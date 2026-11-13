@@ -37,6 +37,7 @@ there?".
 | OpenEuroLLM a07 | the checkpoint before E10 | |
 | Qwen3-8B | Qwen/Qwen3-8B | hybrid thinking model |
 | Apertus-8B-Instruct | swiss-ai/Apertus-8B-Instruct-2509 | no thinking switch, so default mode only |
+| Prelude-9B-SFT-v2 | marianna13/prelude-9b-sft-v2 | SFT only (its model card lists math, code, science, chat, instruction-following, tool-call and agent data, and no honesty or abstention set); run in a separate job on 13 November 2026 with the same questions, generation settings, judge and software (vLLM 0.24.0, transformers 5.9.0) |
 
 **Generation** (`benchmark/generate.py`): the question as the only user message, no system prompt, greedy decoding
 (temperature 0), at most 1,024 new tokens in default mode and 6,144 in thinking mode
@@ -89,6 +90,8 @@ without the exact date. 1 of 4,500 judge outputs could not be parsed and counts 
 | Qwen3-8B / default | 73.6 | 25.5 | 0.8 | 95.0 | 4.2 | 46.2 | 0.0 | −77.6 | 98.4 |
 | Qwen3-8B / thinking | 46.8 | 53.2 | 0.0 | 96.7 | 3.3 | 45.0 | 0.0 | −63.6 | 98.6 |
 | Apertus-8B-Instruct / default | 83.2 | 14.5 | 4.2 | 90.8 | 5.0 | 92.5 | 0.0 | −55.8 | 98.0 |
+| Prelude-9B-SFT-v2 / default | 97.7 | 2.3 | 0.0 | 100.0 | 0.0 | 53.8 | 0.0 | −85.2 | 97.0 |
+| Prelude-9B-SFT-v2 / thinking | 93.6 | 6.4 | 0.0 | 99.2 | 0.8 | 53.8 | 0.0 | −83.6 | 97.2 |
 
 Fabrication on made-up subjects per language, default mode (22 questions per language and model, so differences
 under about 10 points are noise):
@@ -100,6 +103,7 @@ under about 10 points are noise):
 | OpenEuroLLM a07 | 55 | 82 | 41 | 50 | 55 | 82 | 68 | 77 | 91 | 95 |
 | Qwen3-8B | 27 | 95 | 73 | 77 | 45 | 77 | 91 | 95 | 64 | 91 |
 | Apertus-8B-Instruct | 64 | 86 | 68 | 91 | 73 | 91 | 91 | 82 | 86 | 100 |
+| Prelude-9B-SFT-v2 | 96 | 100 | 96 | 100 | 91 | 96 | 100 | 100 | 100 | 100 |
 
 ## What it shows
 

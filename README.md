@@ -67,6 +67,8 @@ your own model: [benchmark/README.md](benchmark/README.md).
 | Qwen3-8B / default | 73.6 % | 25.5 % | 95.0 % | 46.2 % | 0 % | −77.6 | 98.4 % |
 | Qwen3-8B / thinking | 46.8 % | 53.2 % | 96.7 % | 45.0 % | 0 % | −63.6 | 98.6 % |
 | Apertus-8B-Instruct / default | 83.2 % | 14.5 % | 90.8 % | 92.5 % | 0 % | −55.8 | 98.0 % |
+| Prelude-9B-SFT-v2 (SFT only) / default | 97.7 % | 2.3 % | 100 % | 53.8 % | 0 % | −85.2 | 97.0 % |
+| Prelude-9B-SFT-v2 (SFT only) / thinking | 93.6 % | 6.4 % | 99.2 % | 53.8 % | 0 % | −83.6 | 97.2 % |
 | *Release gate (target)* | *< 10 %* | | | | *< 5 %* | | *> 95 %* |
 
 What it shows:
