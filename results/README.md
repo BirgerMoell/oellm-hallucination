@@ -93,6 +93,8 @@ without the exact date. 1 of 4,500 judge outputs could not be parsed and counts 
 | Prelude-9B-SFT-v2 / default | 97.7 | 2.3 | 0.0 | 100.0 | 0.0 | 53.8 | 0.0 | −85.2 | 97.0 |
 | Prelude-9B-SFT-v2 / thinking | 93.6 | 6.4 | 0.0 | 99.2 | 0.8 | 53.8 | 0.0 | −83.6 | 97.2 |
 
+A detailed reading of what Prelude-9B-SFT-v2 gets wrong, with examples: [prelude-9b-sft-v2-analysis.md](prelude-9b-sft-v2-analysis.md).
+
 Fabrication on made-up subjects per language, default mode (22 questions per language and model, so differences
 under about 10 points are noise):
 
