@@ -53,9 +53,20 @@ language. The full rubric is in `judge.py`.
 python generate.py --questions ../data/questions.jsonl --model <model dir> --out runs/<name>/answers.jsonl
 # 2. judge (2 GPUs for gemma-4-31B-it; or --base-url for any OpenAI-compatible server)
 python judge.py --answers runs/<name>/answers.jsonl --judge <gemma-4-31B-it dir> --out runs/<name>/judged.jsonl
-# 3. metrics
-python score.py runs/*/judged.jsonl --by-language
+# 3. metrics and figure
+python score.py runs/*/judged.jsonl --by-language --json runs/report.json
+python plot.py runs/report.json --out runs/report.png
 ```
+
+Or all of it in one Slurm job on a 2-GPU node (models one after the other, then one judge load):
+
+```bash
+MODELS="mymodel=/path/to/model qwen3-8b=/path/to/Qwen3-8B" NO_THINKING="" JUDGE=/path/to/gemma-4-31B-it \
+PYTHON=$(which python) sbatch --account=<account> --partition=<partition> --export=ALL run_slurm.sbatch
+```
+
+Expected time on A100 64 GB: about 10 minutes of generation per model and mode, and about 25 minutes of judging
+for 4,500 answers. The baseline run and its exact settings are described in [../results/README.md](../results/README.md).
 
 `generate.py` and `judge.py` use vLLM (a version with Gemma 4 support for the judge). `build_questions.py`
 rebuilds the question set from Wikidata with another seed (`--seed`) or other languages (it needs templates and

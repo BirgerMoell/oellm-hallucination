@@ -46,8 +46,17 @@ Two conclusions:
 
 ## Benchmark results
 
-500 questions in 10 languages, closed-book, judged by gemma-4-31B-it (13 November 2026). Full numbers in
-[results/baseline-2026-11-13.json](results/baseline-2026-11-13.json).
+![How often do models make things up?](results/baseline-2026-11-13.png)
+
+500 questions in 10 languages, closed-book, judged by gemma-4-31B-it (13 November 2026).
+
+**How it was measured.** Each model gets the question as the only message (no system prompt, no answer format,
+greedy decoding, default and thinking mode). The questions cover made-up people and things (names checked absent
+from Wikidata) and real people from Wikidata at three popularity levels, with their birth date, birthplace and
+occupation as reference. gemma-4-31B-it labels every answer as correct, partly correct, wrong, fabricated, an honest
+"I don't know" or an unhelpful refusal, and checks the language. Full method, metric definitions, per-language
+numbers, judge spot checks and the commands to reproduce it: **[results/README.md](results/README.md)**. To run it on
+your own model: [benchmark/README.md](benchmark/README.md).
 
 | Model / mode | Fabrication on made-up subjects ↓ | Good "I don't know" ↑ | Obscure real people: wrong ↓ | Known people: correct ↑ | Over-refusal ↓ | Truthfulness ↑ | Right language ↑ |
 |---|---|---|---|---|---|---|---|
