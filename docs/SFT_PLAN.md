@@ -99,7 +99,7 @@ Run before and after SFT, on the same checkpoints:
 
 1. **This repo's benchmark** (`benchmark/`): fabrication, good abstention, obscure-person accuracy and errors,
    over-refusal on known people, language following. Targets for the SFT model, closed-book default mode:
-   - fabrication on made-up subjects **below 30 %** (from about 90 % today);
+   - fabrication on made-up subjects **below 30 %** (from 64 % today for our best model);
    - over-refusal on known people **below 5 %**;
    - known-person accuracy no more than 2 points below the previous model.
 2. The identity v3 validation split: cutoff, organisations and languages stated correctly.
@@ -110,7 +110,7 @@ SFT alone will probably not reach the final targets (fabrication below 10 %). Th
 
 ## Order of work
 
-1. Build the benchmark (done) and measure the current models (in progress; results in the README).
+1. Build the benchmark and measure the current models (done: see the README).
 2. Run the audit (D): cheap, and it tells us how much of the problem the existing mix causes.
 3. Build B and C, then train SFT with A + B + C mixed in.
 4. Measure, then run on-policy DPO (PLAN.md step 3) from the SFT checkpoint.

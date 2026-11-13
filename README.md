@@ -46,7 +46,36 @@ Two conclusions:
 
 ## Benchmark results
 
-*Baseline results for five models (three OpenEuroLLM checkpoints, Qwen3-8B, Apertus-8B-Instruct) are being computed and will be added here.*
+500 questions in 10 languages, closed-book, judged by gemma-4-31B-it (13 November 2026). Full numbers in
+[results/baseline-2026-11-13.json](results/baseline-2026-11-13.json).
+
+| Model / mode | Fabrication on made-up subjects ↓ | Good "I don't know" ↑ | Obscure real people: wrong ↓ | Known people: correct ↑ | Over-refusal ↓ | Truthfulness ↑ | Right language ↑ |
+|---|---|---|---|---|---|---|---|
+| OpenEuroLLM E10 (RL) / default | 64.1 % | 26.8 % | 76.7 % | 72.5 % | 1.2 % | −53.4 | 99.8 % |
+| OpenEuroLLM E10 (RL) / thinking | 51.4 % | 46.4 % | 93.3 % | 75.0 % | 0 % | −57.0 | 88.6 % |
+| OpenEuroLLM merge a07 + 0.7 (E10 − a07) / default | 63.6 % | 27.3 % | 75.8 % | 70.0 % | 1.2 % | −53.0 | 99.8 % |
+| OpenEuroLLM a07 (earlier) / default | 69.5 % | 23.6 % | 78.3 % | 71.2 % | 3.8 % | −56.8 | 99.6 % |
+| Qwen3-8B / default | 73.6 % | 25.5 % | 95.0 % | 46.2 % | 0 % | −77.6 | 98.4 % |
+| Qwen3-8B / thinking | 46.8 % | 53.2 % | 96.7 % | 45.0 % | 0 % | −63.6 | 98.6 % |
+| Apertus-8B-Instruct / default | 83.2 % | 14.5 % | 90.8 % | 92.5 % | 0 % | −55.8 | 98.0 % |
+| *Release gate (target)* | *< 10 %* | | | | *< 5 %* | | *> 95 %* |
+
+What it shows:
+
+- **Every model makes things up most of the time.** Asked naturally about a made-up person, novel or village,
+  the 8-9B models invent an answer in 46-83 % of cases. Thinking mode helps (ours: 64 → 51 %; Qwen3: 74 → 47 %),
+  but nothing is close to the 10 % gate.
+- **Obscure real people are almost never answered correctly (0-4 %), but almost always answered anyway.** Our models
+  abstain on about a quarter of them in default mode; the others on 5 % or less.
+- **Over-refusal is not the problem yet** (0-4 % on well-known people), so there is room to push hard on abstention
+  before it starts to cost known answers.
+- **Our RL helped a little**: fabrication 69.5 % (a07) → 64.1 % (E10), with fewer over-refusals.
+- **Our thinking mode answers 11-14 % of non-English questions in English**, a separate bug to fix.
+- Qwen3-8B gets famous people's details wrong surprisingly often (46 % correct; for example Sanna Marin "born 1972").
+  Apertus knows famous people best (92.5 %) but fabricates the most.
+
+The 44-question probe above looked worse for made-up people (12 of 12) than the benchmark (55 %): the probe added a
+role ("the Irish novelist ...") that invites a biography; the benchmark mostly asks with the bare name.
 
 ## Plan in one paragraph
 
