@@ -47,6 +47,10 @@ def facts_for(row: dict) -> str:
     ref = row.get("reference")
     if not ref:
         return "Facts: this subject does not exist (it was invented for this test). No real person, work, company or place has this name."
+    if ref.get("answers"):  # short factual question (training pool): the gold answer and its other names
+        names = ref["answers"]
+        return (f"Facts (Wikidata): the correct answer is {names[0]}"
+                + (f" (also written: {', '.join(names[1:])})" if len(names) > 1 else "") + ".")
     return ("Facts (Wikidata): " + "; ".join(f"{k}: {v}" for k, v in (
         ("English name", ref.get("name_en")), ("description", ref.get("description_en")), ("born", ref.get("born")),
         ("birthplace", ref.get("birthplace")), ("occupations", ref.get("occupations"))) if v))
@@ -72,7 +76,7 @@ def main() -> None:
     ap.add_argument("--tp", type=int, default=2)
     a = ap.parse_args()
     rows = [json.loads(line) for line in a.answers.open(encoding="utf-8")]
-    prompts = [RUBRIC.format(lang=LANG.get(r["language"], r["language"]), question=r["question"], subject=r["subject"],
+    prompts = [RUBRIC.format(lang=LANG.get(r["language"], r["language"]), question=r["question"], subject=r["subject"] or "(see the question)",
                              facts=facts_for(r), answer=(r["answer"] or "(empty)")[:6000]) for r in rows]
     if a.base_url:
         from concurrent.futures import ThreadPoolExecutor

@@ -4,3 +4,4 @@ __pycache__/
 .DS_Store
 .build_cache/
 data/.build_cache/
+data/train/.pool_cache/

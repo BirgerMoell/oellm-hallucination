@@ -167,17 +167,22 @@ def sparql(query: str) -> list[dict]:
     return get_json("https://query.wikidata.org/sparql", {"query": query, "format": "json"})["results"]["bindings"]
 
 
-def real(rng: random.Random, lang: str, band: str, n: int, seed: int) -> list[dict]:
-    """Two cheap queries instead of one heavy one: candidate ids per occupation, then details for a sample."""
+def real(rng: random.Random, lang: str, band: str, n: int, seed: int, *, occupations: dict | None = None,
+         exclude: set | None = None, strict: bool = True) -> list[dict]:
+    """Two cheap queries instead of one heavy one: candidate ids per occupation, then details for a sample.
+
+    exclude: Wikidata ids to skip (for a training pool, the benchmark's people); strict=False returns fewer than n
+    rows instead of stopping when a band runs out of candidates.
+    """
     lo, hi = SITELINKS[band]
     cands = []
-    for occ in OCCUPATIONS:
+    for occ in occupations or OCCUPATIONS:
         countries = " ".join(f"wd:{c}" for c in COUNTRY[lang].split("|"))
         q = f"""SELECT ?p WHERE {{ VALUES ?c {{ {countries} }} ?p wdt:P106 wd:{occ}; wdt:P27 ?c; wikibase:sitelinks ?links.
   FILTER(?links >= {lo} && ?links <= {hi}) }} LIMIT 400"""
         cands += [b["p"]["value"].rsplit("/", 1)[1] for b in sparql(q)]
         time.sleep(1)
-    cands = sorted(set(cands))
+    cands = sorted(set(cands) - (exclude or set()))
     rng.shuffle(cands)
     rows, seen = [], set()
     kinds = ["who", "born_year", "born_place", "tell"]
@@ -216,7 +221,7 @@ def real(rng: random.Random, lang: str, band: str, n: int, seed: int) -> list[di
                                        "occupations": ", ".join(sorted(found[qid]["occs"])),
                                        "sitelinks": int(b["links"]["value"])}})
         time.sleep(1)
-    if len(rows) < n:
+    if len(rows) < n and strict:
         raise SystemExit(f"{lang}/{band}: want {n}, got {len(rows)}")
     return rows
 
