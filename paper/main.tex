@@ -30,7 +30,7 @@ Asked about people and things the way a user would, every 8--9B model we tested 
 We build a natural-question hallucination benchmark (500 questions, no answer format, LLM judge) and show that abstention learned from prompts that offer an explicit \texttt{ANSWER: UNKNOWN} option does not transfer to natural questions.
 We then build on-policy preference data from each model's own judged samples: about 8,600 natural questions, eight samples each, with pairs that prefer an honest ``I don't know'' where the model is usually wrong and a correct answer where it is usually right.
 Four curation rounds, checked by an independent judge from another model family, raise the share of acceptable preferred answers from 78\,\% to 97--98\,\%.
-A first round of direct preference optimisation (DPO) on an SFT-only model lowers fabrication on made-up subjects only from 97.7\,\% to 92.7\,\%, without over-refusal; we analyse why and describe a second round that warm-starts with supervised fine-tuning.
+A first round of direct preference optimisation (DPO) on an SFT-only model lowers fabrication on made-up subjects only from 97.7\,\% to 92.7\,\%, without over-refusal. A supervised warm start on the curated answers lowers it to 3.6\,\% but makes the model refuse 27.5\,\% of questions about well-known people; we describe a second, on-policy DPO round that targets this over-refusal.
 Results on an RL-trained model are in progress.
 \end{abstract}
 
@@ -273,13 +273,45 @@ The RL-trained merge ($\theta_{a07} + 0.7\,(\theta_{E10} - \theta_{a07})$) absta
 Its first training run ran out of GPU memory at step 41 of 48 after reaching 81\,\% held-out reward accuracy; the rerun is queued.
 \todo{Merge results to be added.}
 
+\subsection{SFT warm start}
+\label{sec:warmstart}
+
+As the first step of round two (Section~\ref{sec:next}), we fine-tuned Prelude-9B-SFT-v2 on the curated chosen answers of half A of the pool, with identity and general replies mixed in (two epochs, learning rate $5\times10^{-6}$; 12 minutes on two nodes).
+Validation loss fell from 1.06 to 0.73.
+Supervised training on these targets did what one DPO round could not (Table~\ref{tab:warm}): fabrication on made-up subjects fell from 97.7\,\% to 3.6\,\%, and the model's abstentions were short, written in the question's language, and invented nothing.
+The cost was over-refusal: the model now declines 27.5\,\% of questions about well-known people (32.5\,\% in thinking mode), far above the 5\,\% gate.
+Almost all of these refusals are detail questions (a birth date or birthplace, e.g.\ Baudelaire's date of birth or Pedro Sánchez's birthplace) answered with ``I'm not sure about \ldots''.
+Some may be honest, since the untrained model gave a fully correct answer to only 20\,\% of these questions, but the model clearly knows more than it now says.
+The warm start learned ``unsure about this detail'' too broadly; correcting this is the job of the second DPO round, whose pairs prefer the model's correct answer over its own unnecessary refusal on questions it knows.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Prelude-9B-SFT-v2, default mode & Before & DPO r1 & SFT warm start \\
+\midrule
+Fabrication on made-up subjects (\%) & 97.7 & 92.7 & 3.6 \\
+Good ``I don't know'' on made-up subjects (\%) & 2.3 & 7.3 & 96.4 \\
+Obscure people: wrong / abstain (\%) & 100 / 0 & 95 / 2.5 & 12.5 / 87.5 \\
+Well-known people correct, incl.\ partial (\%) & 53.8 & 61.2 & 58.8 \\
+Over-refusal on well-known people (\%) & 0.0 & 0.0 & 27.5 \\
+Answers in the question's language (\%) & 97.0 & 97.0 & 98.2 \\
+Truthfulness (correct $-$ wrong $-$ fabricated) & $-85$ & $-78$ & $-0.4$ \\
+\bottomrule
+\end{tabular}
+\caption{SFT warm start compared with the first DPO round (benchmark, default mode). In thinking mode the warm-started model fabricates on 2.3\,\% of made-up subjects and over-refuses on 32.5\,\% of well-known people.}
+\label{tab:warm}
+\end{table}
+
 \section{Next steps}
+\label{sec:next}
 
 The second round teaches the behaviour with SFT first, then re-samples so that DPO is truly on-policy, then applies a stronger DPO.
 The question pool is split in two halves: one trains the SFT warm start, the other is re-sampled for DPO, so the DPO pairs come from questions the model was not fine-tuned on.
 \begin{enumerate}
-  \item \textbf{SFT warm start} on the curated chosen answers of half A (about 1,400 honest ``I don't know'' or ``I'm not sure'' replies and 740 correct or false-premise answers), 1,000 identity rows and 3,000 general replies; answers are at least 35\,\% of the hallucination rows.
-  \item \textbf{Re-sample} half B (4,317 questions) from the warm-started model with the same pipeline; it should now produce its own good abstentions.
+  \item \textbf{SFT warm start} on the curated chosen answers of half A (about 1,400 honest ``I don't know'' or ``I'm not sure'' replies and 740 correct or false-premise answers), 1,000 identity rows and 3,000 general replies; answers are at least 35\,\% of the hallucination rows. Done (Section~\ref{sec:warmstart}).
+  \item \textbf{Re-sample} half B (4,317 questions) from the warm-started model with the same pipeline. Its abstentions are now its own, and its unnecessary refusals on questions it knows become rejected answers. Running.
   \item \textbf{Stronger DPO}: learning rate $3\times10^{-6}$ and an added SFT loss on the chosen answers, which helps when chosen answers start out unlikely under the policy.
   \item \textbf{RL with a judge reward} if DPO plateaus: $+1$ correct, $+0.5$ good ``I don't know'' on what it cannot know, $0$ unhelpful refusal, $-0.5$ refusing what it knows, $-1$ fabrication or wrong answer.
   \item \textbf{Thinking mode}: all pairs so far are default mode.
