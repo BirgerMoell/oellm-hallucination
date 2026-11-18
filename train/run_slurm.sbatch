@@ -18,6 +18,7 @@
 #   CONTAINER=/path/to/image.sif    optional: run python inside this Apptainer/Singularity image
 #   BINDS=/a,/b                     optional: container bind paths (default: the working dir, judge and policy dirs)
 #   OUT=runs/<name>                 output directory;  K=8 samples per question
+#   AUDIT_JUDGE=/path/to/Qwen3.5-27B optional: audit the pairs (audit_pairs.py) with a second judge from another family
 #
 #   sbatch --account=<account> --partition=<gpu partition> --export=ALL train/run_slurm.sbatch
 set -euo pipefail
@@ -55,4 +56,9 @@ if [[ ! -s $OUT/curated.jsonl ]]; then
 fi
 echo "== pairs $(date)"
 py "$HERE/build_pairs.py" pairs --judged "$OUT/judged.jsonl" --curated "$OUT/curated.jsonl" --out-dir "$OUT/pairs"
+if [[ -n ${AUDIT_JUDGE:-} ]]; then
+  echo "== audit $(date)"
+  py "$HERE/audit_pairs.py" checks --pairs "$OUT/pairs" --pool "$POOL"
+  py "$HERE/audit_pairs.py" judge --pairs "$OUT/pairs" --pool "$POOL" --judge "$AUDIT_JUDGE" --tp 2 --per-cell "${AUDIT_PER_CELL:-30}"
+fi
 echo "== done $(date)"

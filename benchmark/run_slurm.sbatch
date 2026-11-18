@@ -15,6 +15,7 @@
 #   JUDGE=/path/to/gemma-4-31B-it                            judge model (2 GPUs)
 #   PYTHON=/path/to/python                                   an environment with vLLM (>= 0.24 for Gemma 4) and transformers
 #   CONTAINER=/path/to/image.sif                             optional: run python inside this Apptainer/Singularity image
+#   BINDS=/a,/b                                              optional: container bind paths (default: working dir and judge dir)
 #   OUT=runs                                                 output directory (default: runs)
 #
 #   sbatch --account=<account> --partition=<gpu partition> --export=ALL benchmark/run_slurm.sbatch
@@ -26,7 +27,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 Q=$HERE/../data/questions.jsonl
 py() {
   if [[ -n ${CONTAINER:-} ]]; then
-    apptainer exec --nv -B "$PWD" -B "$(dirname "$JUDGE")" "$CONTAINER" env HF_HUB_OFFLINE=1 VLLM_NO_USAGE_STATS=1 "$PYTHON" "$@"
+    $(command -v apptainer || command -v singularity) exec --nv -B "${BINDS:-$PWD,$(dirname "$JUDGE")}" "$CONTAINER" \
+      env HF_HUB_OFFLINE=1 VLLM_NO_USAGE_STATS=1 "$PYTHON" "$@"
   else
     HF_HUB_OFFLINE=1 VLLM_NO_USAGE_STATS=1 "$PYTHON" "$@"
   fi
