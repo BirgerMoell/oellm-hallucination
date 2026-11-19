@@ -7,7 +7,7 @@ not know, instead of saying so.**
 |---|---|
 | [Model on HF](https://huggingface.co/birgermoell/prelude-9b-sft-v2-hallucination-r2) | Prelude-9B-SFT-v2 after SFT warm start + on-policy DPO round 2: fabrication 97.7 % → 1.8 % (model card with all details); exact training data: [dataset](https://huggingface.co/datasets/birgermoell/prelude-9b-sft-v2-hallucination-r2-data) |
 | [docs/PLAN.md](docs/PLAN.md) | The overall plan: benchmark, SFT, on-policy DPO, RL with a judge reward, release gates |
-| [docs/SFT_PLAN.md](docs/SFT_PLAN.md) | What to add to the next SFT round, how to build it, and how to check it worked |
+| [docs/SFT_PLAN.md](docs/SFT_PLAN.md) | How to fix hallucination inside the main SFT run (no separate warm start or DPO): probe, clean the mix, knowledge-boundary set, phases and gates |
 | [docs/DATASETS.md](docs/DATASETS.md) | Existing anti-hallucination datasets (CoCoNot, Idk, R-Tuning, identity v3) and how to use each |
 | [benchmark/](benchmark/) | Natural-question hallucination benchmark: 500 questions in 10 languages, LLM-judged |
 

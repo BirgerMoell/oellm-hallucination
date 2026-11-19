@@ -1,116 +1,134 @@
-# SFT plan: teaching the model what it does not know
+# SFT plan: fix hallucination inside the main SFT run
 
-For the next supervised fine-tuning (SFT) round of the OpenEuroLLM instruct model. The goal: the model answers what
-it knows, says plainly and helpfully when it does not, and never presents invented facts as real. It must do this
-in natural conversation, not only when a prompt offers "write UNKNOWN".
+**Goal:** the next Prelude SFT comes out of its single SFT run already answering what it knows and saying plainly
+when it does not, so we do not need a separate warm-start SFT or hallucination DPO round afterwards. Target, on our
+benchmark in default **and** thinking mode: fabrication on made-up subjects < 10 %, fewer wrong answers on
+well-known people than today's SFT, lost answers < 5 %, "I don't know who X is" for a well-known person < 2 %,
+language ≥ 95 %, no regression on the general evaluations.
 
-## Why SFT first
+Updated 2026-11-19. Research basis: [SFT_HALLUCINATION_DESIGN.md](SFT_HALLUCINATION_DESIGN.md). Overall plan:
+[PLAN.md](PLAN.md).
 
-Our probe of the current RL model (see the [README](../README.md)) found:
+## Why this can work in one SFT run
 
-- closed-book, it invents full biographies for made-up people (12 of 12) and for obscure real people (11 of 12);
-- its few refusals use a false excuse ("I don't have the capability to access information about novels");
-- the calibration learned from `ANSWER: UNKNOWN` prompts does not transfer to natural questions at all.
+- **Our own evidence.** A 12-minute SFT on ~2,100 curated, model-specific hallucination rows took Prelude-9B-SFT-v2
+  from 97.7 % to 3.6 % fabrication. The behaviour is learnable from SFT data alone. What went wrong (over-refusal,
+  "I'm not sure who John Paul II is") came from how the data was built, and we know the fixes (below).
+- **The research.** Hallucination is largely *taught* by SFT: answers about facts the model does not know (Gekhman et
+  al., 2024) or knows only weakly (Ghosal et al., 2024), and teacher-written answers that carry new knowledge (FLAME,
+  Lin et al., 2024), train the model to answer anyway. How the unfamiliar examples are labelled decides what the model
+  does on unfamiliar questions (Kang et al., 2024). So the fix belongs in the SFT data: remove what teaches guessing,
+  and label the unfamiliar part with the behaviour we want.
+- **Why we needed DPO so far:** we added the behaviour *after* an SFT that had taught the opposite. Building it in from
+  the start removes that conflict; DPO stays available as a polish step, not a requirement.
 
-The likely causes are in SFT. The mix has almost no examples of a good "I don't know" in natural form. It also
-contains confident answers about long-tail facts the base model never learned, which teaches the model to answer
-whether it knows or not (Gekhman et al., 2024). Later DPO and RL rounds fix what SFT cannot, but they work much
-better from a model that has seen the target behaviour.
+## The five changes to the SFT data
 
-## What goes in
+### 1. Probe the checkpoint we will fine-tune (the mid-train base)
 
-| Part | Rows | Languages | Source | Share of a 1M-row mix |
-|---|---|---|---|---|
-| A. Identity v3 | 5,508 | 36 | [openeurollm-model-identity](https://huggingface.co/datasets/openeurollm/openeurollm-model-identity) v3, as is | 0.55 % |
-| B. CoCoNot subset | ~2,300 English + ~5,200 translated | 36 | `allenai/coconot`, filtered and rewritten (below) | 0.75 % |
-| C. Knowledge-boundary set (new) | ~6,000 | 36 | Built per model with the Idk / R-Tuning recipe (below) | 0.6 % |
-| D. Audit of the existing mix | removes or rewrites | all | grep + sampling (below) | n/a |
+Knowledge is model-specific, so the known / unknown split must come from the actual starting checkpoint
+(`prelude-9b-midtrain-v1` or its successor), not from an SFT model.
 
-About 19,000 new rows in total. For a mix of a different size, keep the same counts rather than the same share:
-these are behaviours to learn, not knowledge to absorb, and a few thousand examples per behaviour is enough.
+- **Questions:** the existing pool (8,644 questions, 10 languages) plus the new well-known-people pool
+  (`build_pool.py --extra-known`), extended to ~20K questions over 10 languages in phase 1 and the other OELLM languages
+  in phase 2. Benchmark subjects excluded.
+- **Sampling a base model:** few-shot prompts (5 question-answer examples in the same language, as in Gekhman et al.),
+  8 samples, temperature 0.7, short answers. A base model gives short factual completions, which the judge grades
+  more reliably than long chat answers.
+- **Judging:** gemma-4-31B-it against Wikidata, with separate labels for *knows who the subject is* and *knows the
+  detail asked*.
+- **Categories:** known (≥ 6/8 right), partly known (knows who but not the detail, or 3–5/8), unknown (≤ 2/8),
+  made up.
+- **Cost:** ~20K × 8 short samples + judging ≈ 100 local-h.
 
-### A. Identity v3
+### 2. Clean the general SFT mix (stop teaching guessing)
 
-Use the train split unchanged; keep validation out. It teaches the stated knowledge cutoff (pretraining data to
-December 2025, annealing data from the first half of 2026), "I don't know today's date", "my information may be out
-of date" for recent events, and no invented model names. These are the self-knowledge half of not hallucinating.
+The v2 mix is 4.34M conversations, mostly teacher-written (INTELLECT-3 math, code, science, chat; AgentTrove; SWE).
+Math, code and agent traces do not teach entity facts and stay unchanged. The risk is in the chat and IF parts
+(`am_chat`, `am_if`, thinking-off chat; ~1.4M rows).
 
-### B. CoCoNot subset
-
-| Subcategory | Take | Processing |
+| Step | How | Cost |
 |---|---|---|
-| false presuppositions | all 717 | none |
-| universal unknowns | all 302 | none |
-| temporal limitations | all 341 | rewrite every stated cutoff ("as of my last update in August 2023") to ours, with a template plus a judge check |
-| underspecified | 800 of 2,729 | sample across topics |
-| incomprehensible | 150 of 392 | none |
+| a. Find fact-seeking rows | a small classifier prompt (or Qwen3.5-27B) over the chat/IF prompts: does the answer depend on facts about specific people, works, places, organisations or events? | ~1.4M short classifications, ~40 local-h |
+| b. Rate how well-known the entities are | extract the main entities, look up Wikipedia sitelinks (popularity proxy, Ghosal et al.) | CPU |
+| c. Act on it | well-known entities: keep; long-tail entities (< ~10 sitelinks) with confident detailed claims: drop, or replace the answer with the base model's own probed knowledge (FLAME) or an honest "I'm not sure" | judge on the long-tail subset only |
+| d. Check the estimate | probe a 2 % sample of the kept fact-seeking rows as in step 1; if > 10 % of their claims are unknown to the base, tighten the threshold | ~20 local-h |
 
-Translate about 150 rows per language into the other 35 languages with the same pipeline as identity v3
-(gemma-4-31B-it on Leonardo, with automatic checks). Leave out the humanizing, safety, modality and style
-subcategories (see [DATASETS.md](DATASETS.md)). The 927 contrast DPO pairs go to the DPO stage, not SFT.
+Also fix the cheap things the old plan listed: stale cutoff claims ("as of my last update in 2023"), false capability
+excuses ("I can't access databases"), identity claims of other models. Regex plus judge.
 
-### C. Knowledge-boundary set (the core)
+### 3. Add a knowledge-boundary set built from the probe
 
-The Idk / R-Tuning recipe, adapted so that the targets are natural answers instead of a fixed refusal string.
+About **5,000 rows per language** (50K for 10 languages, ~1 % of the mix): enough not to be diluted in a 4.3M-row single
+pass at lr 2e-5. Our warm start used 2,100 rows at lr 5e-6 for two epochs on a much smaller mix.
 
-1. **Questions.** About 12,000 natural questions without any answer format, in 36 languages:
-   - real people, works and places from Wikidata, across popularity bands (Wikipedia sitelinks);
-   - made-up subjects from the benchmark generator (`benchmark/build_questions.py`), with names checked against
-     Wikidata;
-   - **no overlap** with the benchmark questions (different seed; drop shared subjects).
-2. **Probe the model's knowledge.** Sample the SFT starting checkpoint 8 times per real question (temperature 0.7,
-   closed-book) and grade each sample against the Wikidata reference with the benchmark judge.
-3. **Targets by what the model knows:**
+| Part | Share | Prompt | Target |
+|---|---:|---|---|
+| Known | 35 % | real subjects the base knows: open questions and details | a short correct answer from the model's own samples, checked against Wikidata |
+| Partly known | 15 % | well-known subjects whose detail it gets wrong; open questions where it knows who but not the details | "X is …[what it knows, verified]…; I'm not sure about [detail]" |
+| Unknown real | 20 % | obscure and mid-popularity subjects it gets wrong | a short "I'm not sure about X / that detail", no invented facts, one useful next step |
+| Made up | 15 % | invented people (odd and plausible names), works, places, companies | "I don't recognise X", never "X does not exist", no guesses |
+| False premise / underspecified | 10 % | CoCoNot subset (false presuppositions, universal unknowns, temporal, underspecified), translated | correct the premise or ask what is meant |
+| Identity | 5 % | identity dataset v3.1 | who the model is, its cutoff, what it cannot know |
 
-   | Model gets it right | Target answer |
-   |---|---|
-   | 6-8 of 8 | Its own correct answer (a judged-correct sample), so SFT teaches no new facts |
-   | 3-5 of 8 | A hedged answer: the majority answer with an honest caveat ("I believe ..., but I'm not certain") |
-   | 0-2 of 8, real subject | A good "I don't know" (below) |
-   | made-up subject | A good "I don't know" |
+Rules learned from rounds 1–2 (all already in `train/build_pairs.py` or `build_sft_warmstart.py`):
 
-4. **What a good "I don't know" looks like** (written by gemma-4-31B-it from a style guide, then checked by the
-   judge: no invented facts, correct language):
-   - says plainly that it doesn't recognise or can't recall the subject: "I don't know of a composer called
-     Elin Velkenqvist";
-   - no false excuse ("I can't access databases") when the honest reason is that it doesn't know;
-   - adds what genuinely helps: asks for context, checks for a likely misspelling of a *real* subject it does know
-     (without claiming they are the same), or suggests where to look or that search could help;
-   - short, and in the user's language.
-5. **Balance:** about 40 % made-up subjects, 30 % unknown real, 30 % known real. The known share keeps the model from
-   learning "refuse anything about a person".
-6. **Modes:** 80 % default mode, 20 % thinking mode, where the reasoning trace notices the uncertainty ("I don't
-   recognise this name; I shouldn't guess") before the answer.
+- **Balance by question form:** every template (who is, tell me about, birth date, birthplace, author, director,
+  capital, …) appears with known, partly known, unknown and made-up subjects in similar numbers. Well-known subjects are
+  at least as common as obscure ones in open questions. *(Round 2 failed here.)*
+- **Never make a well-known person an abstention target** for an open question when the model's samples identify them
+  (the `identify` rule); details it does not know get a partial answer.
+- **Do not ask for context about well-known subjects.**
+- **Short, verifiable targets** (≤ 250 characters for answers, ≤ 600 for abstentions); every target passes the strict
+  check (`CHECK` in `build_pairs.py`) and a Qwen3.5-27B audit (target ≥ 95 % acceptable).
+- **Varied wording:** no opening phrase over 10 % of a language's abstentions; plausible made-up names, not only odd ones.
+- **Native per language,** not translated from English (Feng et al., 2024), since knowledge differs per language.
 
-Cost on Leonardo: about 12,000 × 8 samples plus judging, roughly 40-60 local-h.
+### 4. Thinking mode, half of the set
 
-### D. Audit of the existing SFT mix
+The v2 SFT is mostly reasoning traces, and thinking mode lagged in every round (all our pairs were default mode). Half
+of the knowledge-boundary rows get a reasoning trace that recalls what the model knows about the subject and decides:
+"I know X is an Italian politician; I don't recall his birth date reliably, so I shouldn't give one." The final answer
+follows the same rules. Traces are written by gemma-4-31B-it from the probe's labels and checked like the answers.
 
-| Find | How | Action |
-|---|---|---|
-| Stale cutoff claims ("as of my last update in 2023", "my knowledge cutoff is ...") | regex in every language of the mix | rewrite to our cutoff or drop |
-| False capability excuses ("I don't have the capability to access ...") on knowledge questions | regex + judge | rewrite as an honest "I don't know" or drop |
-| Long-tail factual answers the base model does not know | step-C sampling on a 5 % sample of factual QA rows; estimate the unknown share | if over ~10 %, drop or convert the unknown ones |
-| Identity claims about other models ("As an OpenAI model ...") | regex | drop (already part of the identity audit) |
+### 5. Where and how long
 
-## Evaluation and gates
+- Mix the knowledge-boundary set evenly through the single pass (no separate stage).
+- Keep the run at one pass (the v2 recipe). Gekhman et al. show unknown examples are fitted late, so extra epochs on the
+  factual part would raise hallucination; the cleaning in change 2 makes this less sensitive.
 
-Run before and after SFT, on the same checkpoints:
+## Phases
 
-1. **This repo's benchmark** (`benchmark/`): fabrication, good abstention, obscure-person accuracy and errors,
-   over-refusal on known people, language following. Targets for the SFT model, closed-book default mode:
-   - fabrication on made-up subjects **below 30 %** (from 64 % today for our best model);
-   - over-refusal on known people **below 5 %**;
-   - known-person accuracy no more than 2 points below the previous model.
-2. The identity v3 validation split: cutoff, organisations and languages stated correctly.
-3. The existing suite (EU QA, deep search, reasoning, code, EUROPA): no regression beyond noise.
+| Phase | What | Cost (local-h) | Decision |
+|---|---|---:|---|
+| 0. Small-scale test (de-risk) | Rebuild the warm-start set on Prelude-SFT-v2 with the round-2 lessons (form balance, `identify`, partial answers, thinking rows) and the new well-known-people pool; train the 12-minute warm start; benchmark with `score.py --baseline` | ~60 | Go if fabrication < 10 %, lost answers < 5 %, denies known < 2 % in both modes. Otherwise fix the data recipe here, where a run costs minutes, not days |
+| 1. Probe the mid-train base | Change 1 on 10 languages | ~100 | Category shares per language look sane (known share falls with popularity) |
+| 2. Clean the general mix | Change 2 | ~60 | Estimated unknown-claim share in kept fact-seeking rows < 10 % |
+| 3. Build the set | Changes 3 and 4 from the probe; audit | ~50 | Audit ≥ 95 % acceptable per part |
+| 4. Hand over | Rows in the SFT team's `messages` format with a manifest (counts by part, language, mode; template hashes) | 0 | SFT team signs off on the format |
+| 5. SFT run | The team's normal Prelude SFT with the cleaned mix + the set | as the normal run | – |
+| 6. Measure | Benchmark (both modes, `--baseline` = previous SFT), identity eval, the general suite | ~30 | Release gates; DPO only if a gate fails |
 
-SFT alone will probably not reach the final targets (fabrication below 10 %). The DPO and RL steps in
-[PLAN.md](PLAN.md) take it the rest of the way, and they need the benchmark and judge built here.
+Phases 1–3 can run while phase 0 is evaluated; the data recipe is frozen only after phase 0 passes. Total for our side:
+~300 local-h, about the same as one warm-start + DPO round, but done once, before the SFT, for every later model.
 
-## Order of work
+## Ablation (cheap, worth having for the paper)
 
-1. Build the benchmark and measure the current models (done: see the README).
-2. Run the audit (D): cheap, and it tells us how much of the problem the existing mix causes.
-3. Build B and C, then train SFT with A + B + C mixed in.
-4. Measure, then run on-policy DPO (PLAN.md step 3) from the SFT checkpoint.
+At phase 0 scale, train three variants on the same base: (a) the round-1 recipe, (b) + form balance and `identify`,
+(c) + partial answers and thinking rows. This shows which change fixes lost answers and denies-known, at ~20 local-h each.
+
+## Risks
+
+| Risk | Mitigation |
+|---|---|
+| The set is diluted in a 4.3M-row single pass | 5K rows per language (~1 % of rows); phase 0 checks the behaviour; if the full SFT misses the gates, a short DPO polish from the SFT checkpoint (our pipeline) is the fallback |
+| Probing a base model with few-shot prompts mislabels knowledge | compare categories on 500 questions probed both as base (few-shot) and as the current SFT (chat); expect broad agreement |
+| Cleaning drops useful chat data | only long-tail fact-seeking rows are touched (expected a few % of chat/IF); report counts |
+| Over-refusal returns in other forms | gates on lost answers and denies-known in both modes, plus CoCoNot contrast prompts and the 35 % known share |
+| Judge blind spots (gemma both writes and grades) | Qwen3.5-27B audit of targets; hand-check 50 rows per language in phase 3 |
+
+## What we need from the SFT team
+
+- The starting checkpoint for the probe (mid-train base) and the planned mix manifest.
+- Agreement on the cleaning rules for the chat/IF parts.
+- A slot to add ~50K rows and to drop the flagged ones; the evaluation hooks (our benchmark as a standard eval).

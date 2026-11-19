@@ -55,7 +55,9 @@ Default mode, 500-question benchmark in 10 languages. *Lost answers*: well-known
 ### Phase B: build it into the next Prelude SFT (the lasting fix)
 
 From the research (Gekhman et al. 2024; Ghosal et al. 2024; Kang et al. 2024; FLAME 2024; R-Tuning; Cheng et al. 2024)
-and our rounds; full design in [SFT_HALLUCINATION_DESIGN.md](SFT_HALLUCINATION_DESIGN.md).
+and our rounds; research in [SFT_HALLUCINATION_DESIGN.md](SFT_HALLUCINATION_DESIGN.md), step-by-step plan with
+phases, costs and gates in [SFT_PLAN.md](SFT_PLAN.md). The aim is that the SFT run alone passes the release gates, so
+no separate warm start or DPO round is needed.
 
 | # | Step | Why |
 |---|---|---|
