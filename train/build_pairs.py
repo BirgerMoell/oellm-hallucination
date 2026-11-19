@@ -10,6 +10,16 @@ Per question, from the k judged samples (benchmark/judge.py labels), accuracy = 
   sharpen    real subject, 0.5 <= accuracy < 0.75          a correct answer                a wrong answer
   known      real subject, accuracy >= 0.75                a correct answer                a refusal (its own, else a
                                                                                           written one), else a wrong one
+  identify   well-known person, open question ("who is",   a concise correct answer        a wrong answer, else its own
+             "tell me about"), accuracy < 0.5 but some       (rewrite of its best sample)    abstention
+             samples right or partly right
+
+Well-known people (band real_known: a Wikipedia article in 60+ languages) are handled so that the model does not learn
+to deny knowing them (round 2 on Prelude-SFT-v2 answered "I'm not sure who John Paul II is"): an open question about
+one is never an abstention target when any sample identifies the person (case identify), and a detail it cannot give
+("When was Giuseppe Conte born?") gets a partial answer as the chosen reply: who the person is, from the Wikidata
+description only, then that it is unsure of the detail (check kind partial_detail). Made-up, obscure and mid-popularity
+subjects are unchanged.
 
 The "answer if more likely right than wrong" threshold (0.5) matches a +1 / -1 score for right and wrong answers with
 0 for abstaining.
@@ -46,7 +56,9 @@ import judge as J  # noqa: E402
 KNOWN, SHARPEN = 0.75, 0.5
 INVENTED = ("FABRICATED", "WRONG")
 ABSTAIN_CASES = ("made_up", "style", "unknown")
-ANSWER_CASES = ("known", "sharpen")
+ANSWER_CASES = ("known", "sharpen", "identify")
+WELL_KNOWN_BANDS = {"real_known"}
+OPEN_QTYPES = {"who", "tell"}
 # Cases where the policy's own reply may be the chosen one. The audit (Qwen3.5-27B on 40 pairs per cell) found the
 # policy's own replies acceptable 95-97 % of the time for made_up and known, but only 70-85 % for unknown, style and
 # sharpen (excuses, "probably a misspelling", wrong extra details), against 93-100 % for written and rewritten ones.
@@ -101,6 +113,20 @@ Reply:
 
 Reply with the rewritten text only."""
 
+PARTIAL_PROMPT = """You write one reply for an AI assistant. The user asked about one specific detail of a well-known person. The assistant knows who the person is but cannot give this detail reliably, so the honest reply says briefly who the person is and that it is not sure of the detail.
+
+Question ({lang}): {question}
+Who the person is (Wikidata): {who}
+
+Requirements for the reply:
+- Written in {lang}, in a natural, friendly tone, 1 or 2 sentences, plain text without headings, bold text or lists.
+- First say in a few words who the person is, using only the description above: no dates, places, numbers, titles of works or other facts beyond it.
+- Then say clearly that you are not sure of the detail asked, and give no value for it, not even a hedged guess.
+- Do not ask the user who the person is or for other context about them; you may suggest where the detail can be checked.
+- No false excuses such as privacy or lacking internet access.
+
+Reply with the text of the reply only."""
+
 REFUSAL_PROMPT = """Write the reply of an overly cautious AI assistant that declines to answer the question below, saying in 1 or 2 sentences that it does not have reliable information about it and suggesting the user check another source. Written in {lang}, plain text. State no facts.
 
 Question ({lang}): {question}
@@ -143,6 +169,25 @@ The reply passes only if ALL of these hold:
 4. It gives no value for the detail, not even a hedged guess, and no other specific facts.
 5. It gives no excuse such as privacy, "I cannot provide personal data", or lacking internet access.
 6. It is short (at most about 80 words) and helpful in tone, for example suggesting where the detail can be checked.
+
+Reply with JSON only: {{"pass": true/false, "reason": "<the first failed rule, or ok>"}}""",
+    "partial_detail": """You check whether a reply is a good example to train an AI assistant on. The question asks for one specific detail about a well-known person, and the assistant cannot give that detail reliably, so the reply should say briefly who the person is and that it is unsure of the detail.
+
+Question ({lang}): {question}
+Who the person is (Wikidata): {who}
+
+Reply:
+<<<
+{answer}
+>>>
+
+The reply passes only if ALL of these hold:
+1. It is fluent, natural {lang}: no garbled or nonsense words, no broken sentences, no other language mixed in.
+2. It says who the person is, consistent with the Wikidata description above.
+3. It clearly says the assistant is not sure of, or does not know, the specific detail asked for.
+4. It gives no value for the detail, not even a hedged guess, and states no specific fact beyond the description above (no dates, places, numbers, titles of works, awards).
+5. It does not ask who the person is and gives no excuse such as privacy or lacking internet access.
+6. It is short (at most about 60 words).
 
 Reply with JSON only: {{"pass": true/false, "reason": "<the first failed rule, or ok>"}}""",
     "answer": """You check whether a reply is a good example to train an AI assistant on. It should answer the question correctly without adding invented details.
@@ -193,6 +238,9 @@ def classify(samples: list[dict]) -> tuple[str, float]:
             return "made_up", acc
         return ("style", acc) if labels["ABSTAIN_POOR"] else ("skip_already_good", acc)
     wrong = labels["WRONG"] + labels["FABRICATED"]
+    if (samples[0].get("band") in WELL_KNOWN_BANDS and samples[0].get("qtype") in OPEN_QTYPES and acc < SHARPEN
+            and labels["CORRECT"] + labels["PARTIAL"]):
+        return "identify", acc
     if acc >= KNOWN:
         return ("known", acc) if labels["CORRECT"] else ("skip_no_correct", acc)
     if acc >= SHARPEN:
@@ -213,8 +261,18 @@ def candidates(samples: list[dict], case: str, n: int = 3) -> list[str]:
 
 
 def abstain_kind(q: dict) -> str:
-    """Detail questions about real subjects get the stricter check (unsure of the detail, not of the subject)."""
-    return "abstain_detail" if q.get("reference") and q["qtype"] in DETAIL_QTYPES else "abstain"
+    """Detail questions about real subjects get the stricter check (unsure of the detail, not of the subject); about
+    well-known people, a partial answer (who they are, then unsure of the detail)."""
+    if q.get("reference") and q["qtype"] in DETAIL_QTYPES:
+        return "partial_detail" if q.get("band") in WELL_KNOWN_BANDS and who_for(q) else "abstain_detail"
+    return "abstain"
+
+
+def who_for(q: dict) -> str:
+    """Who a well-known person is, from the Wikidata name and description only (never the detail asked)."""
+    ref = q.get("reference") or {}
+    name, desc = ref.get("name_en") or q.get("subject", ""), ref.get("description_en", "")
+    return f"{name}: {desc}" if desc else ""
 
 
 def parse_check(text: str) -> tuple[bool, str]:
@@ -241,7 +299,8 @@ def phase_curate(a) -> None:
     def check(items: list[tuple[dict, str, str]]) -> list[tuple[bool, str]]:
         """items: (first sample of the question, kind 'abstain' | 'answer', reply text)."""
         prompts = [chat(CHECK[kind].format(lang=J.LANG[q["language"]], question=q["question"],
-                                           facts=J.facts_for(q), answer=text[:4000])) for q, kind, text in items]
+                                           facts=J.facts_for(q), who=who_for(q), answer=text[:4000]))
+                   for q, kind, text in items]
         outs = llm.generate(prompts, SamplingParams(temperature=0.0, max_tokens=200))
         return [parse_check(o.outputs[0].text) for o in outs]
 
@@ -281,6 +340,9 @@ def phase_curate(a) -> None:
             ex_text = ("\nFor style, here are replies the same assistant gave to other questions it could not answer "
                        "(do not copy their content):\n" + "\n".join(f"- {e}" for e in ex) + "\n") if ex else ""
             subject = f"“{q['subject']}”" if q["subject"] else "what the question asks about"
+            if abstain_kind(q) == "partial_detail":
+                prompts.append(PARTIAL_PROMPT.format(lang=J.LANG[q["language"]], question=q["question"], who=who_for(q)))
+                continue
             detail = q.get("reference") and q["qtype"] in DETAIL_QTYPES
             what = WHAT_DETAIL if detail else WHAT_UNKNOWN.format(subject=subject)
             prompts.append(WRITER_PROMPT.format(lang=J.LANG[q["language"]], question=q["question"], what=what,
@@ -311,6 +373,7 @@ def phase_curate(a) -> None:
             lang = by_q[c["id"]][0]["language"]
             total = sum(per_lang[lang].values())
             if (c["case"] in ABSTAIN_CASES and c["chosen_source"] == "written"
+                    and abstain_kind(by_q[c["id"]][0]) != "partial_detail"
                     and per_lang[lang][opening(c["chosen"])] > a.max_opening * total):
                 redo.append(c)
         rng.shuffle(redo)
@@ -335,7 +398,14 @@ def phase_curate(a) -> None:
         print(f"variety pass: {changed} of {len(redo)} rewritten", flush=True)
     # 3. answer cases without a passing own answer: a concise rewrite of the policy's shortest correct answer
     todo = [qid for qid, case in cases.items() if case in ANSWER_CASES and qid not in curated]
-    src = {qid: sorted({s["answer"] for s in usable(by_q[qid]) if s["label"] == "CORRECT"}, key=len)[0] for qid in todo}
+    def best(qid: str) -> str:  # the shortest correct sample; for identify, a partly correct one if none is correct
+        for labels in (("CORRECT",), ("PARTIAL",)):
+            texts = sorted({s["answer"] for s in usable(by_q[qid]) if s["label"] in labels}, key=len)
+            if texts:
+                return texts[0]
+        return ""
+    todo = [qid for qid in todo if best(qid)]
+    src = {qid: best(qid) for qid in todo}
     texts = generate([CONCISE_PROMPT.format(lang=J.LANG[by_q[qid][0]["language"]], question=by_q[qid][0]["question"],
                                             facts=J.facts_for(by_q[qid][0]), answer=src[qid][:3000]) for qid in todo], a.seed)
     verdicts = check([(by_q[qid][0], "answer", text) for qid, text in zip(todo, texts)])
@@ -390,6 +460,8 @@ def phase_pairs(a) -> None:
             bad = pick(INVENTED) or pick(("PARTIAL",))
         elif case == "sharpen":
             bad = pick(INVENTED)
+        elif case == "identify":  # a wrong answer, else its own denial of knowing the person
+            bad = pick(INVENTED) or pick(("ABSTAIN_GOOD", "ABSTAIN_POOR"))
         else:  # known: an unnecessary refusal first, then a wrong answer
             bad = pick(("ABSTAIN_GOOD", "ABSTAIN_POOR")) or ([c["refusal"]] if c.get("refusal") else []) or pick(INVENTED)
         bad = [b for b in bad if b != c["chosen"]]
@@ -406,7 +478,7 @@ def phase_pairs(a) -> None:
     # Mix: answering pairs (known + sharpen) are at least --known-share of the total (the over-refusal guard);
     # abstention pairs are capped by --max-abstain and by the answering pairs available.
     abstain = pairs["made_up"] + pairs["unknown"] + pairs["style"]
-    answer = pairs["known"] + pairs["sharpen"]
+    answer = pairs["known"] + pairs["sharpen"] + pairs["identify"]
     rng.shuffle(abstain)
     rng.shuffle(answer)
     abstain = abstain[: min(a.max_abstain, round(len(answer) * (1 - a.known_share) / a.known_share))]
