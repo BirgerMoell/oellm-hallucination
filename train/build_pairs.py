@@ -483,7 +483,11 @@ def phase_pairs(a) -> None:
     rng.shuffle(answer)
     abstain = abstain[: min(a.max_abstain, round(len(answer) * (1 - a.known_share) / a.known_share))]
     answer = answer[: max(round(len(abstain) * a.known_share / (1 - a.known_share)), 0)]
-    rows = abstain + answer
+    # --extra-made-up: more made-up-subject pairs outside the share. They teach "do not invent about names you do
+    # not recognise" without teaching abstention on real people, so they do not cost answers on what the model knows.
+    taken = {r["id"] for r in abstain}
+    extra = [r for r in pairs["made_up"] if r["id"] not in taken][: a.extra_made_up]
+    rows = abstain + answer + extra
     rng.shuffle(rows)
     a.out_dir.mkdir(parents=True, exist_ok=True)
     split = {"train": [r for r in rows if h(r["id"]) >= 0.05], "validation": [r for r in rows if h(r["id"]) < 0.05]}
@@ -515,6 +519,7 @@ def main() -> None:
     ap.add_argument("--out-dir", type=Path, help="pairs: staged DPO files, knowledge.jsonl and pairs-manifest.json")
     ap.add_argument("--known-share", type=float, default=0.35)
     ap.add_argument("--max-abstain", type=int, default=6000)
+    ap.add_argument("--extra-made-up", type=int, default=0, help="pairs: made-up-subject pairs added outside --known-share")
     ap.add_argument("--max-opening", type=float, default=0.10,
                     help="curate: largest share of a language's abstentions that may start with the same three words")
     ap.add_argument("--seed", type=int, default=20261116)
