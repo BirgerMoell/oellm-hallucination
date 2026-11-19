@@ -326,6 +326,39 @@ Truthfulness (correct $-$ wrong $-$ fabricated) & $-85$ & $-78$ & $-0.4$ \\
 \label{tab:warm}
 \end{table}
 
+\subsection{Second DPO round}
+\label{sec:round2}
+
+Re-sampling half B from the warm-started model gave only 617 pairs (round one: 2,277), because the model already abstained on most questions it could not answer; 143 of them prefer the model's correct answer over its own refusal on a question it knows (Qwen3.5-27B audit: 98\,\% prefer the chosen answer).
+We mixed them with the CoCoNot pairs and 1,000 general pairs (so that hallucination pairs stay about 45\,\% of the mix) and trained 15 steps with learning rate $3\times10^{-6}$ and an SFT term of weight 0.5 on the chosen side (held-out reward accuracy 82\,\%).
+
+Fabrication on made-up subjects fell further, to 1.8\,\% (thinking: 2.3\,\%), and on obscure people the model now abstains 97.5\,\% of the time.
+By the benchmark's definition, over-refusal rose to 38.8\,\%.
+A question-by-question comparison with the untrained model shows what this number hides (Table~\ref{tab:transitions}): of the 31 well-known-people questions the model now declines, it had answered 20 wrongly before training, 8 partly and only 3 fully correctly.
+Fully correct answers doubled (16 to 32 of 80; the warm start alone reached 38) and wrong answers fell from 35 to 6, so 88\,\% of the answers it still gives are correct or partly correct.
+Most of the declined questions ask for a birth date or birthplace, which the 9B model mostly never knew (7 of 40 correct before training).
+The over-refusal gate, which counts any abstention on a well-known subject, therefore penalises calibrated abstention; we report alongside it the share of abstentions on questions the untrained model answered correctly.
+Thinking mode is weaker: known accuracy fell from 53.8\,\% to 40.0\,\%, as all pairs are default mode.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Well-known people, default (of 80) & Before & SFT warm start & DPO round 2 \\
+\midrule
+Correct & 16 & 38 & 32 \\
+Partial & 27 & 9 & 11 \\
+Wrong (incl.\ fabricated) & 35 & 11 & 6 \\
+Abstain & 0 & 22 & 31 \\
+\quad of which correct before training & -- & 3 & 3 \\
+\quad of which partial before training & -- & 4 & 8 \\
+\bottomrule
+\end{tabular}
+\caption{Per-question outcomes on well-known people for Prelude-9B-SFT-v2. Abstentions replace mostly wrong answers; two answers before training were unlabelled.}
+\label{tab:transitions}
+\end{table}
+
 \section{Next steps}
 \label{sec:next}
 
@@ -333,8 +366,8 @@ The second round teaches the behaviour with SFT first, then re-samples so that D
 The question pool is split in two halves: one trains the SFT warm start, the other is re-sampled for DPO, so the DPO pairs come from questions the model was not fine-tuned on.
 \begin{enumerate}
   \item \textbf{SFT warm start} on the curated chosen answers of half A (about 1,400 honest ``I don't know'' or ``I'm not sure'' replies and 740 correct or false-premise answers), 1,000 identity rows and 3,000 general replies; answers are at least 35\,\% of the hallucination rows. Done (Section~\ref{sec:warmstart}).
-  \item \textbf{Re-sample} half B (4,317 questions) from the warm-started model with the same pipeline. Its abstentions are now its own, and its unnecessary refusals on questions it knows become rejected answers. Running.
-  \item \textbf{Stronger DPO}: learning rate $3\times10^{-6}$ and an added SFT loss on the chosen answers, which helps when chosen answers start out unlikely under the policy.
+  \item \textbf{Re-sample} half B (4,317 questions) from the warm-started model with the same pipeline. Its abstentions are now its own, and its unnecessary refusals on questions it knows become rejected answers. Done (Section~\ref{sec:round2}).
+  \item \textbf{Stronger DPO}: learning rate $3\times10^{-6}$ and an added SFT loss on the chosen answers, which helps when chosen answers start out unlikely under the policy. Done (Section~\ref{sec:round2}).
   \item \textbf{RL with a judge reward} if DPO plateaus: $+1$ correct, $+0.5$ good ``I don't know'' on what it cannot know, $0$ unhelpful refusal, $-0.5$ refusing what it knows, $-1$ fabrication or wrong answer.
   \item \textbf{Thinking mode}: all pairs so far are default mode.
 \end{enumerate}
