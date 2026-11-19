@@ -18,6 +18,7 @@
 #   CONTAINER=/path/to/image.sif    optional: run python inside this Apptainer/Singularity image
 #   BINDS=/a,/b                     optional: container bind paths (default: the working dir, judge and policy dirs)
 #   OUT=runs/<name>                 output directory;  K=8 samples per question
+#   KNOWN_SHARE=0.35                minimum share of answer pairs (known + sharpen) among the hallucination pairs
 #   AUDIT_JUDGE=/path/to/Qwen3.5-27B optional: audit the pairs (audit_pairs.py) with a second judge from another family
 #
 #   sbatch --account=<account> --partition=<gpu partition> --export=ALL train/run_slurm.sbatch
@@ -55,7 +56,8 @@ if [[ ! -s $OUT/curated.jsonl ]]; then
   py "$HERE/build_pairs.py" curate --judged "$OUT/judged.jsonl" --writer "$JUDGE" --tp 2 --out "$OUT/curated.jsonl"
 fi
 echo "== pairs $(date)"
-py "$HERE/build_pairs.py" pairs --judged "$OUT/judged.jsonl" --curated "$OUT/curated.jsonl" --out-dir "$OUT/pairs"
+py "$HERE/build_pairs.py" pairs --judged "$OUT/judged.jsonl" --curated "$OUT/curated.jsonl" --out-dir "$OUT/pairs" \
+  --known-share "${KNOWN_SHARE:-0.35}"
 if [[ -n ${AUDIT_JUDGE:-} ]]; then
   echo "== audit $(date)"
   py "$HERE/audit_pairs.py" checks --pairs "$OUT/pairs" --pool "$POOL"
