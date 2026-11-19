@@ -30,8 +30,10 @@ Asked about people and things the way a user would, every 8--9B model we tested 
 We build a natural-question hallucination benchmark (500 questions, no answer format, LLM judge) and show that abstention learned from prompts that offer an explicit \texttt{ANSWER: UNKNOWN} option does not transfer to natural questions.
 We then build on-policy preference data from each model's own judged samples: about 8,600 natural questions, eight samples each, with pairs that prefer an honest ``I don't know'' where the model is usually wrong and a correct answer where it is usually right.
 Four curation rounds, checked by an independent judge from another model family, raise the share of acceptable preferred answers from 78\,\% to 97--98\,\%.
-A first round of direct preference optimisation (DPO) on an SFT-only model lowers fabrication on made-up subjects only from 97.7\,\% to 92.7\,\%, without over-refusal. A supervised warm start on the curated answers lowers it to 3.6\,\% but makes the model refuse 27.5\,\% of questions about well-known people; we describe a second, on-policy DPO round that targets this over-refusal.
-Results on an RL-trained model are in progress.
+A first round of direct preference optimisation (DPO) lowers fabrication on made-up subjects from 63.6\,\% to 38.2\,\% on an RL-trained model that already abstained sometimes, but only from 97.7\,\% to 92.7\,\% on an SFT-only model that almost never did.
+For that model, a supervised warm start on the curated answers followed by a second, truly on-policy DPO round lowers fabrication to 1.8\,\% and turns the truthfulness score from $-85$ to $+4$, with answers kept in the question's language.
+The model now declines 39\,\% of questions about well-known people; a per-question comparison shows that most of these it had answered wrongly before training (wrong answers fall from 35 to 6 of 80, correct ones double), so the usual over-refusal measure mostly counts calibrated abstention, though some knowledge is lost.
+We release the model, the exact training data and every benchmark output.
 \end{abstract}
 
 \section{Introduction}
@@ -48,7 +50,8 @@ We found that this hides the problem: our RL-trained model abstains correctly wh
   \item A natural-question hallucination benchmark in ten languages, with popularity bands and made-up subjects, graded by an LLM judge (Section~\ref{sec:benchmark}).
   \item Baseline results for five 8--9B models and evidence that format-based abstention training does not transfer to natural questions (Sections~\ref{sec:baseline} and~\ref{sec:format}).
   \item A pipeline for on-policy DPO data built from a model's own judged answers, with a curation and audit procedure that raises the share of acceptable training targets to 97--98\,\% (Sections~\ref{sec:method} and~\ref{sec:quality}).
-  \item First DPO results on two models of the same family, and the failure modes we found along the way (Section~\ref{sec:results}).
+  \item DPO results on two models of the same family, and a two-stage recipe (SFT warm start, then on-policy DPO) that lowers fabrication from 97.7\,\% to 1.8\,\% on a model that never abstained, with a per-question analysis of what it costs in answered questions (Section~\ref{sec:results}).
+  \item The released model, its exact training data and every benchmark output.
 \end{enumerate}
 
 \section{Related work}
@@ -339,6 +342,14 @@ Fully correct answers doubled (16 to 32 of 80; the warm start alone reached 38) 
 Most of the declined questions ask for a birth date or birthplace, which the 9B model mostly never knew (7 of 40 correct before training).
 The over-refusal gate, which counts any abstention on a well-known subject, therefore penalises calibrated abstention; we report alongside it the share of abstentions on questions the untrained model answered correctly.
 Thinking mode is weaker: known accuracy fell from 53.8\,\% to 40.0\,\%, as all pairs are default mode.
+Figure~\ref{fig:stages} summarises the four stages.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/fig2-stages.png}
+\caption{Prelude-9B-SFT-v2 through the stages (default mode). DPO round 1 was a separate run; the released model is the SFT warm start followed by DPO round 2.}
+\label{fig:stages}
+\end{figure}
 
 \begin{table}[t]
 \centering
@@ -362,16 +373,15 @@ Abstain & 0 & 22 & 31 \\
 \section{Next steps}
 \label{sec:next}
 
-The second round teaches the behaviour with SFT first, then re-samples so that DPO is truly on-policy, then applies a stronger DPO.
-The question pool is split in two halves: one trains the SFT warm start, the other is re-sampled for DPO, so the DPO pairs come from questions the model was not fine-tuned on.
+The round-two recipe (Sections~\ref{sec:warmstart}--\ref{sec:round2}) works for fabrication; the open problem is how much the model gives up.
 \begin{enumerate}
-  \item \textbf{SFT warm start} on the curated chosen answers of half A (about 1,400 honest ``I don't know'' or ``I'm not sure'' replies and 740 correct or false-premise answers), 1,000 identity rows and 3,000 general replies; answers are at least 35\,\% of the hallucination rows. Done (Section~\ref{sec:warmstart}).
-  \item \textbf{Re-sample} half B (4,317 questions) from the warm-started model with the same pipeline. Its abstentions are now its own, and its unnecessary refusals on questions it knows become rejected answers. Done (Section~\ref{sec:round2}).
-  \item \textbf{Stronger DPO}: learning rate $3\times10^{-6}$ and an added SFT loss on the chosen answers, which helps when chosen answers start out unlikely under the policy. Done (Section~\ref{sec:round2}).
+  \item \textbf{The RL-trained merge through round two} (running). It starts out knowing more (70\,\% known correct) and abstaining sometimes. To lose fewer answers than Prelude-SFT-v2 did, answers make up 50\,\% instead of 35\,\% of the hallucination rows in its warm start and at least 50\,\% of its round-two pairs.
+  \item \textbf{A fairer over-refusal gate.} Count abstentions on questions the untrained model answered correctly (in several samples), not every abstention on a well-known subject.
+  \item \textbf{General evaluations} (math, code, instruction following, tool use, long context) for every candidate; none have been run on the released model yet.
+  \item \textbf{Thinking mode}: all pairs so far are default mode, and thinking mode lost accuracy on known facts.
   \item \textbf{RL with a judge reward} if DPO plateaus: $+1$ correct, $+0.5$ good ``I don't know'' on what it cannot know, $0$ unhelpful refusal, $-0.5$ refusing what it knows, $-1$ fabrication or wrong answer.
-  \item \textbf{Thinking mode}: all pairs so far are default mode.
 \end{enumerate}
-Release gate for every checkpoint: fabrication below 10\,\%, over-refusal on well-known people below 5\,\%, at least 95\,\% of answers in the question's language, and no regression on the general evaluations.
+Release gate for every checkpoint: fabrication below 10\,\%, over-refusal on well-known people below 5\,\% (to be replaced by the gate in item 2), at least 95\,\% of answers in the question's language, and no regression on the general evaluations.
 
 \section{Limitations}
 
@@ -389,7 +399,7 @@ Release gate for every checkpoint: fabrication below 10\,\%, over-refusal on wel
 Benchmark, training pipeline and results: \url{https://github.com/BirgerMoell/oellm-hallucination}.
 Data sources: Wikidata (CC0), CoCoNot (ODC-By), and general preference pairs from translated Dolci, UltraFeedback and HelpSteer3.
 Models: Prelude-9B-SFT-v2 (\path{marianna13/prelude-9b-sft-v2}) and OpenEuroLLM 9B RL checkpoints.
-The round-2 model (SFT warm start + DPO round 2) is released as \path{birgermoell/prelude-9b-sft-v2-hallucination-r2}.
+The round-2 model (SFT warm start + DPO round 2) is released as \path{birgermoell/prelude-9b-sft-v2-hallucination-r2}; its exact training data, curated answers, audits and every benchmark output are in the dataset \path{birgermoell/prelude-9b-sft-v2-hallucination-r2-data}.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
