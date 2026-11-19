@@ -13,6 +13,10 @@ Three parts, per language:
 Every benchmark subject (data/questions.jsonl) is excluded, by Wikidata id and by name.
 
   python build_pool.py --eu-qa train_qa.jsonl --out ../data/train/pool.jsonl [--languages en de ...] [--seed 20261116]
+  python build_pool.py --extra-known 50 --exclude-pool ../data/train/pool.jsonl --out ../data/train/pool-known.jsonl
+The second form adds only open questions ("who is", "tell me about") about well-known people (60+ Wikipedia languages),
+excluding the benchmark and the main pool: the main pool has 750 such questions about obscure and mid-popularity
+people but only 177 about well-known ones, and round 2 taught the model to deny knowing some well-known people.
 Needs internet (Wikidata). Finished languages are cached next to --out, so an interrupted run continues.
 """
 from __future__ import annotations
@@ -163,7 +167,9 @@ def fact_rows(eu_qa: Path, lang: str, rng: random.Random, exclude_ids: set[str])
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--eu-qa", type=Path, required=True, help="eu_qa train_qa.jsonl (oellm-rlvr data/eu-tasks)")
+    ap.add_argument("--eu-qa", type=Path, help="eu_qa train_qa.jsonl (oellm-rlvr data/eu-tasks); not needed with --extra-known")
+    ap.add_argument("--extra-known", type=int, default=0, help="only this many well-known people per language, open questions")
+    ap.add_argument("--exclude-pool", type=Path, help="with --extra-known: a pool whose people are excluded")
     ap.add_argument("--benchmark", type=Path, default=Path(__file__).resolve().parent.parent / "data/questions.jsonl")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--languages", nargs="+", default=list(B.COUNTRY))
@@ -172,6 +178,26 @@ def main() -> None:
     bench = [json.loads(line) for line in a.benchmark.open(encoding="utf-8")]
     exclude_ids = {q["reference"]["wikidata"] for q in bench if q.get("reference")}
     banned = {q["subject"] for q in bench}
+    if a.extra_known:
+        if a.exclude_pool:
+            for line in a.exclude_pool.open(encoding="utf-8"):
+                r = json.loads(line)
+                banned.add(r["subject"])
+                if r.get("reference", {}).get("wikidata"):
+                    exclude_ids.add(r["reference"]["wikidata"])
+        out = []
+        for lang in a.languages:
+            rng = random.Random(f"{a.seed}:known:{lang}")
+            got = B.real(rng, lang, "real_known", a.extra_known, a.seed, occupations=OCCUPATIONS, exclude=exclude_ids,
+                         strict=False, kinds=["who", "tell"])
+            got = [r for r in got if r["subject"] not in banned]
+            out += [{"id": f"poolk-{lang}-{i:04d}", "language": lang, **r, "band": "real_known"} for i, r in enumerate(got)]
+            print(lang, len(got), flush=True)
+        a.out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in out))
+        print(len(out), "questions ->", a.out)
+        return
+    if not a.eu_qa:
+        ap.error("--eu-qa is required")
     cache = a.out.parent / ".pool_cache"
     cache.mkdir(parents=True, exist_ok=True)
     out = []

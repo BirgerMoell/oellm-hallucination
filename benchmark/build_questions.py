@@ -168,11 +168,11 @@ def sparql(query: str) -> list[dict]:
 
 
 def real(rng: random.Random, lang: str, band: str, n: int, seed: int, *, occupations: dict | None = None,
-         exclude: set | None = None, strict: bool = True) -> list[dict]:
+         exclude: set | None = None, strict: bool = True, kinds: list[str] | None = None) -> list[dict]:
     """Two cheap queries instead of one heavy one: candidate ids per occupation, then details for a sample.
 
     exclude: Wikidata ids to skip (for a training pool, the benchmark's people); strict=False returns fewer than n
-    rows instead of stopping when a band runs out of candidates.
+    rows instead of stopping when a band runs out of candidates; kinds: the question types to cycle through.
     """
     lo, hi = SITELINKS[band]
     cands = []
@@ -185,7 +185,7 @@ def real(rng: random.Random, lang: str, band: str, n: int, seed: int, *, occupat
     cands = sorted(set(cands) - (exclude or set()))
     rng.shuffle(cands)
     rows, seen = [], set()
-    kinds = ["who", "born_year", "born_place", "tell"]
+    kinds = kinds or ["who", "born_year", "born_place", "tell"]
     for i in range(0, len(cands), 60):
         if len(rows) == n:
             break
